@@ -13,10 +13,11 @@
 
 # 現在の状態
 
-- Next.js + TypeScript + Tailwind CSS のモックアップが完成済み
+- Next.js + TypeScript + Tailwind CSS で実装済み・Vercel 公開済み
 - 問題データは `src/data/questions.json` で管理（15問・5カテゴリ）
-- UIは動作する（選択・回答・フィードバックパネル・進捗バー）
-- Vercel公開はまだ
+- UIは本気AIドリルをトレース済み（即回答・ラジオボタン・フィードバックパネル・完了画面）
+- GitHub: https://github.com/uwanomovie-ops/camera-drill-app
+- Vercel: デプロイ済み（2026-06-27）
 
 ---
 
@@ -26,10 +27,10 @@
 |-------|------|------|
 | Phase 1 | 問題データをJSONに分離・問題数を増やす | ✅ 完了 |
 | Phase 2 | UIを本気AIドリルのスクショからトレース | ✅ 完了 |
-| Phase 3 | GitHubリポジトリ作成・Vercelで公開 | 未着手 |
+| Phase 3 | GitHubリポジトリ作成・Vercelで公開 | ✅ 完了 |
 | Phase 4 | データベース（Neon）導入・進捗管理 | 将来対応 |
 
-**7/4提出の目標はPhase 3まで完成させること。**
+**7/4提出の目標はPhase 3まで完成 → 達成済み。**
 
 ---
 
