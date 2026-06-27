@@ -23,14 +23,15 @@
 
 # ロードマップ
 
-| Phase | 内容 | 状態 |
-|-------|------|------|
-| Phase 1 | 問題データをJSONに分離・問題数を増やす | ✅ 完了 |
-| Phase 2 | UIを本気AIドリルのスクショからトレース | ✅ 完了 |
-| Phase 3 | GitHubリポジトリ作成・Vercelで公開 | ✅ 完了 |
-| Phase 4 | データベース（Neon）導入・進捗管理 | 将来対応 |
+| Phase | 内容 | 期限 | 状態 |
+|-------|------|------|------|
+| Phase 1 | 問題データをJSONに分離・問題数を増やす | - | ✅ 完了 |
+| Phase 2 | UIを本気AIドリルのスクショからトレース | - | ✅ 完了 |
+| Phase 3 | GitHubリポジトリ作成・Vercelで公開 | - | ✅ 完了 |
+| Phase 4 | データベース（Neon）導入・進捗管理・Quiz Studio | 7/4 | 🚧 着手中 |
+| Phase 5 | 難易度調整・複数出題パターン | 7/4 | 📋 予定 |
 
-**7/4提出の目標はPhase 3まで完成 → 達成済み。**
+**7/4提出の目標はPhase 5まで完成。**
 
 ---
 
@@ -38,8 +39,36 @@
 
 - **Phase 1〜3**: 問題データは `src/data/questions.json` で管理
 - 問題の原稿はMarkdownで書いてAIにJSONへ変換させる
-- **Phase 4以降**: Neon（データベース）に移行して進捗管理を追加
-- Quiz Studio（管理ツール）はPhase 3公開後に別途作成する
+- **Phase 4**: Neon（サーバーレスPostgreSQL）に移行して進捗管理を追加
+- **Phase 5**: 問題に `difficulty` フィールド追加・複数の出題パターンに対応
+
+## Phase 4 設計
+
+### DBスキーマ（Neon PostgreSQL）
+- `questions`: id, category, question, choices(JSON), answer, explanation, difficulty, created_at
+- `quiz_sessions`: id, anonymous_user_id, score, total, completed_at
+- `quiz_answers`: id, session_id, question_id, selected_label, is_correct
+
+### ユーザー識別
+- ログインなし・匿名
+- ブラウザにUUID（`anon_id`）を生成してlocalStorageに保存
+- Vercelのサーバーサイドにはcookieで渡す
+
+### Quiz Studio（/admin）
+- 認証: 環境変数 `ADMIN_PASSWORD` によるシンプルなパスワード保護
+- 機能: 問題の一覧・追加・編集・削除（CRUD）
+
+## Phase 5 設計
+
+### 難易度
+- `difficulty: "easy" | "medium" | "hard"` フィールド
+- 出題前に難易度フィルターを選べるスタート画面を追加
+
+### 出題パターン
+- 選択肢（現在の4択）
+- ○×（`true_false` タイプ）
+- 穴埋め（`fill_blank` タイプ）
+- 問題に `type` フィールドを追加してUIを出し分け
 
 ---
 

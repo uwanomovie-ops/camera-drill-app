@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import questionsData from "@/src/data/questions.json";
+import { useState, useEffect } from "react";
 
 type Question = {
   id: number;
@@ -10,11 +9,28 @@ type Question = {
   choices: { label: string; text: string }[];
   answer: string;
   explanation: string;
+  difficulty: string;
+  type: string;
 };
 
-const questions: Question[] = questionsData as Question[];
+type Session = {
+  id: number;
+  score: number;
+  total: number;
+  completedAt: string;
+};
 
 type Phase = "answering" | "correct" | "incorrect";
+
+function getOrCreateUserId(): string {
+  if (typeof window === "undefined") return "";
+  let id = localStorage.getItem("anon_id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("anon_id", id);
+  }
+  return id;
+}
 
 function CheckIcon({ className }: { className?: string }) {
   return (
@@ -41,19 +57,42 @@ function FlagIcon({ className }: { className?: string }) {
 }
 
 export default function Home() {
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("answering");
   const [correctCount, setCorrectCount] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
+  const [pastSessions, setPastSessions] = useState<Session[]>([]);
+  const [answers, setAnswers] = useState<
+    { questionId: number; selectedLabel: string; isCorrect: boolean }[]
+  >([]);
+
+  useEffect(() => {
+    fetch("/api/questions")
+      .then((r) => r.json())
+      .then((data) => {
+        setQuestions(data);
+        setLoading(false);
+      });
+
+    const userId = getOrCreateUserId();
+    fetch(`/api/sessions?userId=${userId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) setPastSessions(data);
+      });
+  }, []);
 
   const question = questions[currentIndex];
   const isLast = currentIndex >= questions.length - 1;
   const feedbackVisible = phase !== "answering";
   const isCorrect = phase === "correct";
-
   const progress =
-    ((currentIndex + (feedbackVisible ? 1 : 0)) / questions.length) * 100;
+    questions.length > 0
+      ? ((currentIndex + (feedbackVisible ? 1 : 0)) / questions.length) * 100
+      : 0;
 
   function handleSelect(label: string) {
     if (feedbackVisible) return;
@@ -61,10 +100,25 @@ export default function Home() {
     setSelected(label);
     setPhase(correct ? "correct" : "incorrect");
     if (correct) setCorrectCount((c) => c + 1);
+    setAnswers((prev) => [
+      ...prev,
+      { questionId: question.id, selectedLabel: label, isCorrect: correct },
+    ]);
   }
 
-  function handleNext() {
+  async function handleNext() {
     if (isLast) {
+      const userId = getOrCreateUserId();
+      await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          anonymousUserId: userId,
+          score: correctCount + (isCorrect ? 0 : 0),
+          total: questions.length,
+          answers,
+        }),
+      });
       setIsFinished(true);
     } else {
       setCurrentIndex((i) => i + 1);
@@ -79,6 +133,22 @@ export default function Home() {
     setPhase("answering");
     setCorrectCount(0);
     setIsFinished(false);
+    setAnswers([]);
+    const userId = getOrCreateUserId();
+    fetch(`/api/sessions?userId=${userId}`)
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setPastSessions(data); });
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-slate-800 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-slate-500">問題を読み込み中...</p>
+        </div>
+      </div>
+    );
   }
 
   if (isFinished) {
@@ -108,6 +178,24 @@ export default function Home() {
           </div>
         </div>
 
+        {pastSessions.length > 1 && (
+          <div className="w-full max-w-xs bg-white rounded-2xl p-4 shadow-sm">
+            <p className="text-xs font-bold text-slate-500 mb-3">過去の記録</p>
+            <div className="flex flex-col gap-2">
+              {pastSessions.slice(0, 5).map((s, i) => (
+                <div key={s.id} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-400">
+                    {i === 0 ? "今回" : new Date(s.completedAt).toLocaleDateString("ja-JP", { month: "short", day: "numeric" })}
+                  </span>
+                  <span className="font-bold text-slate-700">
+                    {s.score}/{s.total}（{Math.round((s.score / s.total) * 100)}%）
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="w-full max-w-xs flex flex-col gap-3">
           <button
             onClick={handleRestart}
@@ -119,6 +207,8 @@ export default function Home() {
       </div>
     );
   }
+
+  if (!question) return null;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
@@ -154,6 +244,13 @@ export default function Home() {
               Q{currentIndex + 1}
             </span>
             <span className="text-sm text-slate-400">/ {questions.length}問</span>
+            <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${
+              question.difficulty === "easy" ? "bg-green-100 text-green-700" :
+              question.difficulty === "hard" ? "bg-red-100 text-red-700" :
+              "bg-yellow-100 text-yellow-700"
+            }`}>
+              {question.difficulty === "easy" ? "やさしい" : question.difficulty === "hard" ? "むずかしい" : "ふつう"}
+            </span>
           </div>
 
           {/* Question */}
@@ -168,8 +265,7 @@ export default function Home() {
               const isAnswered = feedbackVisible;
               const isChoiceCorrect = choice.label === question.answer;
 
-              let cardStyle =
-                "border border-slate-200 bg-white shadow-sm";
+              let cardStyle = "border border-slate-200 bg-white shadow-sm";
               let labelStyle = "bg-slate-100 text-slate-600";
 
               if (isAnswered) {
@@ -180,16 +276,14 @@ export default function Home() {
                   cardStyle = "border border-red-200 bg-red-50 shadow-sm";
                   labelStyle = "bg-red-400 text-white";
                 } else {
-                  cardStyle =
-                    "border border-slate-100 bg-white shadow-sm opacity-40";
+                  cardStyle = "border border-slate-100 bg-white shadow-sm opacity-40";
                 }
               } else if (isSelected) {
                 cardStyle = "border-2 border-slate-800 bg-white shadow-sm";
                 labelStyle = "bg-slate-800 text-white";
               }
 
-              const showFilled =
-                isSelected || (isAnswered && isChoiceCorrect);
+              const showFilled = isSelected || (isAnswered && isChoiceCorrect);
               let radioOuter = "border-2 border-slate-300";
               let radioDot = "bg-slate-800";
               if (isAnswered && isChoiceCorrect) {
@@ -209,9 +303,7 @@ export default function Home() {
                   onClick={() => handleSelect(choice.label)}
                   className={`flex items-center gap-3 w-full rounded-2xl px-4 py-4 text-left transition-all active:scale-[0.98] ${cardStyle}`}
                 >
-                  <span
-                    className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${labelStyle}`}
-                  >
+                  <span className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${labelStyle}`}>
                     {isAnswered && isChoiceCorrect ? (
                       <CheckIcon className="w-4 h-4" />
                     ) : (
@@ -221,12 +313,8 @@ export default function Home() {
                   <span className="flex-1 text-sm font-semibold text-slate-700 leading-snug">
                     {choice.text}
                   </span>
-                  <span
-                    className={`w-5 h-5 rounded-full shrink-0 flex items-center justify-center ${radioOuter}`}
-                  >
-                    {showFilled && (
-                      <span className={`w-2.5 h-2.5 rounded-full ${radioDot}`} />
-                    )}
+                  <span className={`w-5 h-5 rounded-full shrink-0 flex items-center justify-center ${radioOuter}`}>
+                    {showFilled && <span className={`w-2.5 h-2.5 rounded-full ${radioDot}`} />}
                   </span>
                 </button>
               );
@@ -236,30 +324,17 @@ export default function Home() {
 
         {/* Feedback panel */}
         {feedbackVisible && (
-          <div
-            className={`px-4 pt-5 pb-8 ${
-              isCorrect ? "bg-green-50" : "bg-red-50"
-            }`}
-          >
-            {/* Label row */}
+          <div className={`px-4 pt-5 pb-8 ${isCorrect ? "bg-green-50" : "bg-red-50"}`}>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <span
-                  className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-                    isCorrect ? "bg-green-500" : "bg-red-400"
-                  }`}
-                >
+                <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${isCorrect ? "bg-green-500" : "bg-red-400"}`}>
                   {isCorrect ? (
                     <CheckIcon className="w-3.5 h-3.5 text-white" />
                   ) : (
                     <CloseIcon className="w-3 h-3 text-white" />
                   )}
                 </span>
-                <span
-                  className={`text-xl font-black ${
-                    isCorrect ? "text-green-700" : "text-red-600"
-                  }`}
-                >
+                <span className={`text-xl font-black ${isCorrect ? "text-green-700" : "text-red-600"}`}>
                   {isCorrect ? "正解！" : "不正解..."}
                 </span>
               </div>
@@ -268,13 +343,8 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Explanation card */}
             <div className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
-              <p
-                className={`text-xs font-bold mb-2 ${
-                  isCorrect ? "text-green-600" : "text-red-500"
-                }`}
-              >
+              <p className={`text-xs font-bold mb-2 ${isCorrect ? "text-green-600" : "text-red-500"}`}>
                 マスターのワンポイント
               </p>
               <p className="text-sm text-slate-700 leading-relaxed">
@@ -282,7 +352,6 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Next button */}
             <button
               onClick={handleNext}
               className="w-full py-4 bg-white rounded-2xl font-bold text-base text-slate-800 shadow-sm active:scale-95 transition-all"
