@@ -1,7 +1,16 @@
 import { pgTable, serial, text, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 
+export const questionSets = pgTable("question_sets", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  orderIndex: integer("order_index").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const questions = pgTable("questions", {
   id: serial("id").primaryKey(),
+  setId: integer("set_id").references(() => questionSets.id, { onDelete: "set null" }),
   category: text("category").notNull(),
   question: text("question").notNull(),
   choices: jsonb("choices").notNull().$type<{ label: string; text: string }[]>(),
@@ -9,6 +18,8 @@ export const questions = pgTable("questions", {
   explanation: text("explanation").notNull(),
   difficulty: text("difficulty").notNull().default("medium"),
   type: text("type").notNull().default("multiple_choice"),
+  orderIndex: integer("order_index").notNull().default(0),
+  published: boolean("published").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

@@ -1,734 +1,223 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { Question, QuestionSet } from "./components/types";
+import { ContentTree } from "./components/ContentTree";
+import { EditorPane } from "./components/EditorPane";
+import { QuestionPreview } from "./components/QuestionPreview";
+import { AgentsBar } from "./components/AgentsBar";
 
-type Question = {
-  id: number;
-  category: string;
-  question: string;
-  choices: { label: string; text: string }[];
-  answer: string;
-  explanation: string;
-  difficulty: string;
-  type: string;
-};
+// ── Password Gate ────────────────────────────────────────────────────────────
 
-type Draft = Omit<Question, "id"> & { type: string };
+function PasswordGate({ onAuth }: { onAuth: () => void }) {
+  const [password, setPassword] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
 
-const CATEGORIES = ["露出", "レンズ", "構図", "ライティング", "カメラの仕組み"];
-const DIFFICULTIES = [
-  { value: "easy", label: "やさしい" },
-  { value: "medium", label: "ふつう" },
-  { value: "hard", label: "むずかしい" },
-];
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setChecking(true);
+    setError("");
+    const res = await fetch("/api/admin/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    setChecking(false);
+    if (res.ok) {
+      sessionStorage.setItem("quiz_studio_authed", "1");
+      onAuth();
+    } else {
+      setError("パスワードが違います");
+      setPassword("");
+    }
+  }
 
-function DifficultyBadge({ value }: { value: string }) {
-  const map: Record<string, string> = {
-    easy: "bg-green-100 text-green-700",
-    medium: "bg-yellow-100 text-yellow-700",
-    hard: "bg-red-100 text-red-700",
-  };
-  const label: Record<string, string> = { easy: "やさしい", medium: "ふつう", hard: "むずかしい" };
   return (
-    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${map[value] ?? "bg-slate-100 text-slate-600"}`}>
-      {label[value] ?? value}
-    </span>
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center px-6">
+      <div className="w-full max-w-xs">
+        <div className="text-center mb-8">
+          <p className="text-4xl mb-3">📷</p>
+          <h1 className="text-lg font-black text-white">カメラドリルスタジオ</h1>
+          <p className="text-xs text-slate-400 mt-1">管理画面にアクセスするにはパスワードが必要です</p>
+        </div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="パスワードを入力"
+            autoFocus
+            className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400"
+          />
+          {error && <p className="text-red-400 text-xs text-center">{error}</p>}
+          <button
+            type="submit"
+            disabled={checking || !password}
+            className="w-full py-3 bg-white text-slate-900 rounded-xl text-sm font-bold active:scale-95 transition-all disabled:opacity-40"
+          >
+            {checking ? "確認中..." : "入る →"}
+          </button>
+        </form>
+      </div>
+    </div>
   );
 }
 
-export default function AdminPage() {
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<Partial<Question>>({});
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [genCategory, setGenCategory] = useState(CATEGORIES[0]);
-  const [genDifficulty, setGenDifficulty] = useState("medium");
-  const [genType, setGenType] = useState("multiple_choice");
-  const [feedback, setFeedback] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+// ── Main Page ────────────────────────────────────────────────────────────────
 
-  const fetchQuestions = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch("/api/questions");
+export default function AdminPage() {
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [sets, setSets] = useState<QuestionSet[]>([]);
+  const [selectedSetId, setSelectedSetId] = useState<number | null>(null);
+  const [setQuestions, setSetQuestions] = useState<Question[]>([]);
+  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
+
+  const fetchSets = useCallback(async () => {
+    const res = await fetch("/api/sets");
     const data = await res.json();
-    setQuestions(data);
-    setLoading(false);
+    setSets(data);
+  }, []);
+
+  const fetchSetQuestions = useCallback(async (setId: number) => {
+    const res = await fetch(`/api/sets/${setId}/questions`);
+    const data = await res.json();
+    setSetQuestions(data);
+  }, []);
+
+  function handleSelectSet(id: number) {
+    setSelectedSetId(id);
+    setSelectedQuestion(null);
+    fetchSetQuestions(id);
+  }
+
+  async function handleAddSet(category: string, name: string) {
+    await fetch("/api/sets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, category }),
+    });
+    fetchSets();
+  }
+
+  async function handleRenameSet(id: number, name: string) {
+    await fetch(`/api/sets/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    fetchSets();
+  }
+
+  async function handleDeleteSet(id: number, name: string) {
+    if (!confirm(`「${name}」を削除しますか？\n（セット内の問題は削除されず「未割り当て」になります）`)) return;
+    await fetch(`/api/sets/${id}`, { method: "DELETE" });
+    if (selectedSetId === id) {
+      setSelectedSetId(null);
+      setSetQuestions([]);
+      setSelectedQuestion(null);
+    }
+    fetchSets();
+  }
+
+  function handleQuestionSaved() {
+    fetchSets();
+    if (selectedSetId) fetchSetQuestions(selectedSetId);
+  }
+
+  function handleQuestionUpdated(q: Question) {
+    setSelectedQuestion(q);
+    setSetQuestions((prev) => prev.map((p) => (p.id === q.id ? q : p)));
+  }
+
+  async function handleMoveQuestion(id: number, direction: "up" | "down") {
+    await fetch(`/api/questions/${id}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ direction }),
+    });
+    if (selectedSetId) fetchSetQuestions(selectedSetId);
+  }
+
+  useEffect(() => {
+    const ok = sessionStorage.getItem("quiz_studio_authed") === "1";
+    setAuthed(ok);
   }, []);
 
   useEffect(() => {
-    fetchQuestions();
-  }, [fetchQuestions]);
+    if (authed) fetchSets();
+  }, [authed, fetchSets]);
 
-  function showMsg(type: "success" | "error", text: string) {
-    setMessage({ type, text });
-    setTimeout(() => setMessage(null), 3000);
-  }
-
-  async function handleDelete(id: number) {
-    if (!confirm("この問題を削除しますか？")) return;
-    await fetch(`/api/questions/${id}`, { method: "DELETE" });
-    showMsg("success", "削除しました");
-    fetchQuestions();
-  }
-
-  async function handleUpdate(id: number) {
-    setSaving(true);
-    const res = await fetch(`/api/questions/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editForm),
-    });
-    setSaving(false);
-    if (res.ok) {
-      showMsg("success", "更新しました");
-      setEditingId(null);
-      fetchQuestions();
-    } else {
-      showMsg("error", "更新に失敗しました");
-    }
-  }
-
-  async function handleSaveDraft() {
-    if (!draft) return;
-    setSaving(true);
-    const res = await fetch("/api/questions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...draft, type: draft.type ?? genType }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      showMsg("success", "問題を追加しました");
-      setDraft(null);
-      setFeedback("");
-      fetchQuestions();
-    } else {
-      showMsg("error", "追加に失敗しました");
-    }
-  }
-
-  async function handleGenerate() {
-    setGenerating(true);
-    setDraft(null);
-    const res = await fetch("/api/admin/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        category: genCategory,
-        difficulty: genDifficulty,
-        type: genType,
-        feedback: feedback || undefined,
-      }),
-    });
-    setGenerating(false);
-    if (res.ok) {
-      const data = await res.json();
-      setDraft(data);
-      setFeedback("");
-    } else {
-      const err = await res.json();
-      showMsg("error", err.error ?? "生成に失敗しました");
-    }
-  }
+  if (authed === null) return null;
+  if (!authed) return <PasswordGate onAuth={() => { setAuthed(true); fetchSets(); }} />;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
       {/* Header */}
-      <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-black">📷 Quiz Studio</h1>
-          <p className="text-xs text-slate-400">カメラドリル 管理画面</p>
+      <div className="h-14 shrink-0 bg-slate-900 text-white flex items-center justify-between px-5 border-b border-slate-800">
+        <div className="flex items-center gap-3">
+          <span className="text-xl">📷</span>
+          <div>
+            <span className="text-sm font-black tracking-tight">カメラドリルスタジオ</span>
+            <span className="ml-2 text-[10px] text-slate-500 border border-slate-700 px-1.5 py-0.5 rounded">Studio</span>
+          </div>
         </div>
-        <a href="/" className="text-xs text-slate-400 hover:text-white transition-colors">
-          ← アプリに戻る
-        </a>
-      </div>
-
-      {/* Toast */}
-      {message && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-lg ${
-          message.type === "success" ? "bg-green-500 text-white" : "bg-red-500 text-white"
-        }`}>
-          {message.text}
-        </div>
-      )}
-
-      <div className="max-w-4xl mx-auto px-4 py-8 flex flex-col gap-8">
-        {/* AI Generate Section */}
-        <section className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-          <div className="flex items-center gap-2 mb-5">
-            <span className="text-2xl">✨</span>
-            <h2 className="text-base font-black text-slate-800">AIで問題を生成</h2>
-          </div>
-
-          <div className="flex flex-wrap gap-3 mb-4">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold text-slate-500">カテゴリ</label>
-              <select
-                value={genCategory}
-                onChange={(e) => setGenCategory(e.target.value)}
-                className="border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-slate-800"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold text-slate-500">難易度</label>
-              <select
-                value={genDifficulty}
-                onChange={(e) => setGenDifficulty(e.target.value)}
-                className="border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-slate-800"
-              >
-                {DIFFICULTIES.map((d) => (
-                  <option key={d.value} value={d.value}>{d.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Type selector */}
-          <div className="flex flex-col gap-1 mb-4">
-            <label className="text-xs font-bold text-slate-500">出題タイプ</label>
-            <div className="flex gap-2">
-              {[
-                { value: "multiple_choice", label: "4択" },
-                { value: "true_false", label: "○×" },
-                { value: "fill_blank", label: "穴埋め" },
-                { value: "ordering", label: "並べ替え" },
-                { value: "matching", label: "関連付け" },
-              ].map((t) => (
-                <button
-                  key={t.value}
-                  type="button"
-                  onClick={() => { setGenType(t.value); setDraft(null); setFeedback(""); }}
-                  className={`px-4 py-1.5 rounded-xl text-sm font-bold border transition-all active:scale-95 ${
-                    genType === t.value
-                      ? "bg-slate-800 text-white border-slate-800"
-                      : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {draft && (
-            <div className="mb-4">
-              <label className="text-xs font-bold text-slate-500 block mb-1">
-                修正フィードバック（任意）
-              </label>
-              <input
-                type="text"
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                placeholder="例：もっとやさしい表現にして / 選択肢をわかりやすく"
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-800"
-              />
-            </div>
-          )}
-
+        <div className="flex items-center gap-4">
+          <a href="/" className="text-xs text-slate-400 hover:text-white transition-colors">
+            ← アプリに戻る
+          </a>
           <button
-            onClick={handleGenerate}
-            disabled={generating}
-            className="px-5 py-2.5 bg-slate-800 text-white rounded-xl text-sm font-bold active:scale-95 transition-all disabled:opacity-50"
+            onClick={() => { sessionStorage.removeItem("quiz_studio_authed"); setAuthed(false); }}
+            className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
           >
-            {generating ? "生成中..." : draft ? "再生成する" : "AIで生成する"}
+            ログアウト
           </button>
-
-          {/* Draft preview */}
-          {draft && (
-            <div className="mt-5 border border-slate-200 rounded-2xl p-5 bg-slate-50">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs font-bold text-slate-500">草案プレビュー</span>
-                <DifficultyBadge value={draft.difficulty} />
-                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                  {draft.category}
-                </span>
-              </div>
-              <p className="text-sm font-bold text-slate-800 mb-3">{draft.question}</p>
-              <div className="flex flex-col gap-1.5 mb-3">
-                {draft.choices.map((c) => (
-                  <div key={c.label} className={`flex gap-2 text-sm p-2 rounded-lg ${c.label === draft.answer ? "bg-green-50 border border-green-200" : "bg-white border border-slate-100"}`}>
-                    <span className={`font-black w-5 shrink-0 ${c.label === draft.answer ? "text-green-600" : "text-slate-400"}`}>{c.label}</span>
-                    <span className="text-slate-700">{c.text}</span>
-                    {c.label === draft.answer && <span className="ml-auto text-green-600 text-xs font-bold">正解</span>}
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-slate-600 bg-white border border-slate-100 rounded-xl p-3 leading-relaxed">
-                💡 {draft.explanation}
-              </p>
-
-              <div className="flex gap-2 mt-4">
-                <button
-                  onClick={handleSaveDraft}
-                  disabled={saving}
-                  className="flex-1 py-2.5 bg-green-500 text-white rounded-xl text-sm font-bold active:scale-95 transition-all disabled:opacity-50"
-                >
-                  {saving ? "保存中..." : "✓ 採用して保存"}
-                </button>
-                <button
-                  onClick={() => { setDraft(null); setFeedback(""); }}
-                  className="px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 active:scale-95 transition-all"
-                >
-                  破棄
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* Question List */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-black text-slate-800">
-              問題一覧
-              <span className="ml-2 text-sm font-normal text-slate-400">{questions.length}問</span>
-            </h2>
-            <button
-              onClick={() => setShowAddForm(!showAddForm)}
-              className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold active:scale-95 transition-all"
-            >
-              ＋ 手動で追加
-            </button>
-          </div>
-
-          {/* Manual add form */}
-          {showAddForm && (
-            <ManualAddForm
-              onSave={async (data) => {
-                setSaving(true);
-                const res = await fetch("/api/questions", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(data),
-                });
-                setSaving(false);
-                if (res.ok) {
-                  showMsg("success", "追加しました");
-                  setShowAddForm(false);
-                  fetchQuestions();
-                }
-              }}
-              onCancel={() => setShowAddForm(false)}
-              saving={saving}
-            />
-          )}
-
-          {loading ? (
-            <div className="flex justify-center py-12">
-              <div className="w-6 h-6 border-2 border-slate-800 border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {questions.map((q) => (
-                <div key={q.id} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-                  {editingId === q.id ? (
-                    <EditForm
-                      question={q}
-                      form={editForm}
-                      onChange={setEditForm}
-                      onSave={() => handleUpdate(q.id)}
-                      onCancel={() => setEditingId(null)}
-                      saving={saving}
-                    />
-                  ) : (
-                    <>
-                      <div className="flex items-start justify-between gap-3 mb-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold text-slate-400">#{q.id}</span>
-                          <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{q.category}</span>
-                          <DifficultyBadge value={q.difficulty} />
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button
-                            onClick={() => { setEditingId(q.id); setEditForm(q); }}
-                            className="text-xs font-bold text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg active:scale-95 transition-all hover:bg-slate-50"
-                          >
-                            編集
-                          </button>
-                          <button
-                            onClick={() => handleDelete(q.id)}
-                            className="text-xs font-bold text-red-500 border border-red-100 px-3 py-1.5 rounded-lg active:scale-95 transition-all hover:bg-red-50"
-                          >
-                            削除
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-sm font-semibold text-slate-800 mb-2">{q.question}</p>
-                      <div className="flex flex-col gap-1">
-                        {q.choices.map((c) => (
-                          <p key={c.label} className={`text-xs ${c.label === q.answer ? "text-green-600 font-bold" : "text-slate-400"}`}>
-                            {c.label}. {c.text} {c.label === q.answer && "✓"}
-                          </p>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        </div>
       </div>
-    </div>
-  );
-}
 
-function EditForm({
-  question,
-  form,
-  onChange,
-  onSave,
-  onCancel,
-  saving,
-}: {
-  question: Question;
-  form: Partial<Question>;
-  onChange: (f: Partial<Question>) => void;
-  onSave: () => void;
-  onCancel: () => void;
-  saving: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex gap-2">
-        <select
-          value={form.category ?? question.category}
-          onChange={(e) => onChange({ ...form, category: e.target.value })}
-          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none"
-        >
-          {["露出", "レンズ", "構図", "ライティング", "カメラの仕組み"].map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <select
-          value={form.difficulty ?? question.difficulty}
-          onChange={(e) => onChange({ ...form, difficulty: e.target.value })}
-          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none"
-        >
-          <option value="easy">やさしい</option>
-          <option value="medium">ふつう</option>
-          <option value="hard">むずかしい</option>
-        </select>
-      </div>
-      <textarea
-        value={form.question ?? question.question}
-        onChange={(e) => onChange({ ...form, question: e.target.value })}
-        rows={2}
-        className="border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-800 resize-none"
-      />
-      {(form.choices ?? question.choices).map((c, i) => (
-        <div key={c.label} className="flex gap-2 items-center">
-          <span className="text-xs font-black text-slate-500 w-4">{c.label}</span>
-          <input
-            value={c.text}
-            onChange={(e) => {
-              const newChoices = [...(form.choices ?? question.choices)];
-              newChoices[i] = { ...newChoices[i], text: e.target.value };
-              onChange({ ...form, choices: newChoices });
-            }}
-            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none"
+      {/* 4-pane body */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left: Content Tree (w-56) */}
+        <div className="w-56 shrink-0 border-r border-slate-800 overflow-hidden">
+          <ContentTree
+            sets={sets}
+            questions={setQuestions}
+            selectedSetId={selectedSetId}
+            selectedQuestionId={selectedQuestion?.id ?? null}
+            onSelectSet={handleSelectSet}
+            onSelectQuestion={setSelectedQuestion}
+            onAddSet={handleAddSet}
+            onRenameSet={handleRenameSet}
+            onDeleteSet={handleDeleteSet}
           />
         </div>
-      ))}
-      <div className="flex gap-2 items-center">
-        <span className="text-xs font-bold text-slate-500">正解：</span>
-        <select
-          value={form.answer ?? question.answer}
-          onChange={(e) => onChange({ ...form, answer: e.target.value })}
-          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none"
-        >
-          {["A", "B", "C", "D"].map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
-      </div>
-      <textarea
-        value={form.explanation ?? question.explanation}
-        onChange={(e) => onChange({ ...form, explanation: e.target.value })}
-        rows={2}
-        placeholder="解説"
-        className="border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none resize-none"
-      />
-      <div className="flex gap-2">
-        <button
-          onClick={onSave}
-          disabled={saving}
-          className="flex-1 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold disabled:opacity-50"
-        >
-          {saving ? "保存中..." : "保存"}
-        </button>
-        <button onClick={onCancel} className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600">
-          キャンセル
-        </button>
-      </div>
-    </div>
-  );
-}
 
-const TRUE_FALSE_CHOICES = [
-  { label: "A", text: "○" },
-  { label: "B", text: "×" },
-];
+        {/* Center: Editor Pane (flex-1) */}
+        <div className="flex-1 overflow-hidden">
+          <EditorPane
+            selectedQuestion={selectedQuestion}
+            selectedSetId={selectedSetId}
+            sets={sets}
+            onQuestionSaved={handleQuestionSaved}
+            onQuestionUpdated={handleQuestionUpdated}
+            onMoveQuestion={handleMoveQuestion}
+          />
+        </div>
 
-const LABELS = ["A", "B", "C", "D", "E", "F", "G", "H"];
-
-function ManualAddForm({
-  onSave,
-  onCancel,
-  saving,
-}: {
-  onSave: (data: Omit<Question, "id">) => void;
-  onCancel: () => void;
-  saving: boolean;
-}) {
-  const [type, setType] = useState("multiple_choice");
-  const [category, setCategory] = useState("露出");
-  const [difficulty, setDifficulty] = useState("medium");
-  const [question, setQuestion] = useState("");
-  const [explanation, setExplanation] = useState("");
-
-  // multiple_choice
-  const [mcChoices, setMcChoices] = useState(["", "", "", ""]);
-  const [mcAnswer, setMcAnswer] = useState("A");
-
-  // true_false
-  const [tfAnswer, setTfAnswer] = useState("A");
-
-  // fill_blank
-  const [fbAnswer, setFbAnswer] = useState("");
-
-  // ordering: items entered in correct order
-  const [orderItems, setOrderItems] = useState(["", "", "", ""]);
-
-  // matching: pairs [left, right]
-  const [matchRows, setMatchRows] = useState([
-    { left: "", right: "" },
-    { left: "", right: "" },
-    { left: "", right: "" },
-  ]);
-
-  function handleTypeChange(newType: string) {
-    setType(newType);
-  }
-
-  function buildPayload(): Omit<Question, "id"> | null {
-    if (!question.trim()) return null;
-
-    if (type === "multiple_choice") {
-      const choices = mcChoices.map((text, i) => ({ label: LABELS[i], text }));
-      return { type, category, difficulty, question, choices, answer: mcAnswer, explanation };
-    }
-    if (type === "true_false") {
-      return { type, category, difficulty, question, choices: TRUE_FALSE_CHOICES, answer: tfAnswer, explanation };
-    }
-    if (type === "fill_blank") {
-      if (!fbAnswer.trim()) return null;
-      return { type, category, difficulty, question, choices: [], answer: fbAnswer.trim(), explanation };
-    }
-    if (type === "ordering") {
-      const filled = orderItems.filter((t) => t.trim());
-      if (filled.length < 2) return null;
-      const choices = filled.map((text, i) => ({ label: LABELS[i], text }));
-      const answer = choices.map((c) => c.label).join(",");
-      return { type, category, difficulty, question, choices, answer, explanation };
-    }
-    if (type === "matching") {
-      const filled = matchRows.filter((r) => r.left.trim() && r.right.trim());
-      if (filled.length < 2) return null;
-      const n = filled.length;
-      const leftChoices = filled.map((r, i) => ({ label: LABELS[i], text: r.left }));
-      const rightChoices = filled.map((r, i) => ({ label: LABELS[n + i], text: r.right }));
-      const choices = [...leftChoices, ...rightChoices];
-      const answer = leftChoices.map((l, i) => `${l.label}:${rightChoices[i].label}`).join(",");
-      return { type, category, difficulty, question, choices, answer, explanation };
-    }
-    return null;
-  }
-
-  function handleSubmit() {
-    const payload = buildPayload();
-    if (payload) onSave(payload);
-  }
-
-  const isSubmittable = !!buildPayload();
-
-  const TYPE_TABS = [
-    { value: "multiple_choice", label: "4択" },
-    { value: "true_false", label: "○×" },
-    { value: "fill_blank", label: "穴埋め" },
-    { value: "ordering", label: "並べ替え" },
-    { value: "matching", label: "関連付け" },
-  ];
-
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm border border-dashed border-slate-300 mb-3">
-      <p className="text-xs font-black text-slate-500 mb-3">新規問題</p>
-
-      {/* Type tabs */}
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {TYPE_TABS.map((t) => (
-          <button
-            key={t.value}
-            type="button"
-            onClick={() => handleTypeChange(t.value)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-              type === t.value ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-500 border-slate-200"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* カテゴリ・難易度 */}
-      <div className="flex gap-2 mb-3">
-        <select value={category} onChange={(e) => setCategory(e.target.value)}
-          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none">
-          {["露出", "レンズ", "構図", "ライティング", "カメラの仕組み"].map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}
-          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none">
-          <option value="easy">やさしい</option>
-          <option value="medium">ふつう</option>
-          <option value="hard">むずかしい</option>
-        </select>
-      </div>
-
-      {/* 問題文 */}
-      <textarea value={question} onChange={(e) => setQuestion(e.target.value)} rows={2}
-        placeholder={
-          type === "fill_blank" ? "問題文（空欄は___で表す）" :
-          type === "ordering" ? "問題文（例：正しい順番に並べてください）" :
-          type === "matching" ? "問題文（例：正しく組み合わせてください）" : "問題文"
-        }
-        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none mb-3 resize-none"
-      />
-
-      {/* ── 4択 ── */}
-      {type === "multiple_choice" && (
-        <>
-          {mcChoices.map((text, i) => (
-            <div key={i} className="flex gap-2 items-center mb-1.5">
-              <span className="text-xs font-black text-slate-500 w-4">{LABELS[i]}</span>
-              <input value={text} onChange={(e) => { const nc = [...mcChoices]; nc[i] = e.target.value; setMcChoices(nc); }}
-                placeholder={`選択肢 ${LABELS[i]}`}
-                className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
-            </div>
-          ))}
-          <div className="flex gap-2 items-center mb-3">
-            <span className="text-xs font-bold text-slate-500">正解：</span>
-            <select value={mcAnswer} onChange={(e) => setMcAnswer(e.target.value)}
-              className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none">
-              {["A", "B", "C", "D"].map((l) => <option key={l} value={l}>{l}</option>)}
-            </select>
+        {/* Right: Preview + Agents Bar (w-72, split 50/50) */}
+        <div className="w-72 shrink-0 border-l border-slate-200 flex flex-col overflow-hidden">
+          <div className="h-1/2 overflow-hidden border-b border-slate-200">
+            <QuestionPreview question={selectedQuestion} />
           </div>
-        </>
-      )}
-
-      {/* ── ○× ── */}
-      {type === "true_false" && (
-        <div className="flex gap-3 items-center mb-3">
-          {TRUE_FALSE_CHOICES.map((c) => (
-            <div key={c.label} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg">
-              <span className="text-xs font-black text-slate-400">{c.label}</span>
-              <span className="text-sm font-bold text-slate-700">{c.text}</span>
-            </div>
-          ))}
-          <span className="text-xs text-slate-400">正解：</span>
-          <select value={tfAnswer} onChange={(e) => setTfAnswer(e.target.value)}
-            className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none">
-            <option value="A">A（○）</option>
-            <option value="B">B（×）</option>
-          </select>
-        </div>
-      )}
-
-      {/* ── 穴埋め ── */}
-      {type === "fill_blank" && (
-        <div className="flex gap-2 items-center mb-3">
-          <span className="text-xs font-bold text-slate-500 shrink-0">正解：</span>
-          <input value={fbAnswer} onChange={(e) => setFbAnswer(e.target.value)}
-            placeholder="空欄に入る正解テキスト"
-            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
-        </div>
-      )}
-
-      {/* ── 並べ替え ── */}
-      {type === "ordering" && (
-        <div className="mb-3">
-          <p className="text-xs text-slate-400 mb-2">正しい順番で入力してください（上から順に正解）</p>
-          {orderItems.map((text, i) => (
-            <div key={i} className="flex gap-2 items-center mb-1.5">
-              <span className="text-xs font-black text-slate-400 w-4">{i + 1}</span>
-              <input value={text} onChange={(e) => { const n = [...orderItems]; n[i] = e.target.value; setOrderItems(n); }}
-                placeholder={`${i + 1}番目の項目`}
-                className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
-            </div>
-          ))}
-          <div className="flex gap-2 mt-1">
-            {orderItems.length < 4 && (
-              <button type="button" onClick={() => setOrderItems((p) => [...p, ""])}
-                className="text-xs text-slate-500 border border-slate-200 px-2 py-1 rounded-lg">＋ 項目追加</button>
-            )}
-            {orderItems.length > 2 && (
-              <button type="button" onClick={() => setOrderItems((p) => p.slice(0, -1))}
-                className="text-xs text-red-400 border border-red-100 px-2 py-1 rounded-lg">－ 削除</button>
-            )}
+          <div className="h-1/2 overflow-hidden">
+            <AgentsBar
+              selectedQuestion={selectedQuestion}
+              selectedSetId={selectedSetId}
+              sets={sets}
+              onQuestionSaved={handleQuestionSaved}
+            />
           </div>
         </div>
-      )}
-
-      {/* ── 関連付け ── */}
-      {type === "matching" && (
-        <div className="mb-3">
-          <div className="grid grid-cols-2 gap-2 mb-1">
-            <p className="text-xs font-bold text-slate-400">左側</p>
-            <p className="text-xs font-bold text-slate-400">右側（対応）</p>
-          </div>
-          {matchRows.map((row, i) => (
-            <div key={i} className="grid grid-cols-2 gap-2 mb-1.5">
-              <input value={row.left} onChange={(e) => { const n = [...matchRows]; n[i] = { ...n[i], left: e.target.value }; setMatchRows(n); }}
-                placeholder={`左${i + 1}`}
-                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
-              <input value={row.right} onChange={(e) => { const n = [...matchRows]; n[i] = { ...n[i], right: e.target.value }; setMatchRows(n); }}
-                placeholder={`右${i + 1}`}
-                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
-            </div>
-          ))}
-          <div className="flex gap-2 mt-1">
-            {matchRows.length < 5 && (
-              <button type="button" onClick={() => setMatchRows((p) => [...p, { left: "", right: "" }])}
-                className="text-xs text-slate-500 border border-slate-200 px-2 py-1 rounded-lg">＋ ペア追加</button>
-            )}
-            {matchRows.length > 2 && (
-              <button type="button" onClick={() => setMatchRows((p) => p.slice(0, -1))}
-                className="text-xs text-red-400 border border-red-100 px-2 py-1 rounded-lg">－ 削除</button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 解説 */}
-      <textarea value={explanation} onChange={(e) => setExplanation(e.target.value)} rows={2}
-        placeholder="解説"
-        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none resize-none mb-3"
-      />
-
-      <div className="flex gap-2">
-        <button onClick={handleSubmit} disabled={saving || !isSubmittable}
-          className="flex-1 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold disabled:opacity-50">
-          {saving ? "保存中..." : "追加"}
-        </button>
-        <button onClick={onCancel} className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600">
-          キャンセル
-        </button>
       </div>
     </div>
   );

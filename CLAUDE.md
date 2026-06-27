@@ -14,12 +14,14 @@
 # 現在の状態
 
 - Next.js + TypeScript + Tailwind CSS で実装済み・Vercel 公開済み
-- 問題データは Neon PostgreSQL（`questions`テーブル）で管理（15問・5カテゴリ）
+- 問題データは Neon PostgreSQL（`questions`テーブル）で管理（5カテゴリ）
 - UIは本気AIドリルをトレース済み（即回答・ラジオボタン・フィードバックパネル・完了画面）
 - 匿名UUID進捗保存（localStorage → quiz_sessions / quiz_answers テーブル）
-- Quiz Studio（`/admin`）: 問題CRUD + Gemini 2.5 Flash によるAI問題生成
+- Quiz Studio（`/admin`）: パスワード認証 + 問題CRUD + Gemini 2.5 Flash によるAI問題生成
+- 5種類の出題タイプ対応: 4択・○×・穴埋め・並べ替え・関連付け
+- 難易度フィルター・カテゴリフィルター付きスタート画面
 - GitHub: https://github.com/uwanomovie-ops/camera-drill-app
-- Vercel: デプロイ済み（Phase 4完了 2026-06-27）
+- Vercel: デプロイ済み（Phase 5完了 2026-06-27）
 
 ## 技術スタック
 
@@ -44,7 +46,7 @@
 | Phase 2 | UIを本気AIドリルのスクショからトレース | - | ✅ 完了 |
 | Phase 3 | GitHubリポジトリ作成・Vercelで公開 | - | ✅ 完了 |
 | Phase 4 | データベース（Neon）導入・進捗管理・Quiz Studio | 7/4 | ✅ 完了 |
-| Phase 5 | 難易度調整・複数出題パターン | 7/4 | 📋 予定 |
+| Phase 5 | 難易度調整・複数出題パターン | 7/4 | ✅ 完了 |
 
 **7/4提出の目標はPhase 5まで完成。**
 
