@@ -1,20 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/src/db";
 import { questions } from "@/src/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get("category");
   const difficulty = searchParams.get("difficulty");
 
-  let query = db.select().from(questions).orderBy(asc(questions.id));
+  const conditions = [
+    ...(category ? [eq(questions.category, category)] : []),
+    ...(difficulty ? [eq(questions.difficulty, difficulty)] : []),
+  ];
 
-  const rows = await (category
-    ? db.select().from(questions).where(eq(questions.category, category)).orderBy(asc(questions.id))
-    : difficulty
-    ? db.select().from(questions).where(eq(questions.difficulty, difficulty)).orderBy(asc(questions.id))
-    : db.select().from(questions).orderBy(asc(questions.id)));
+  const rows = await db
+    .select()
+    .from(questions)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(asc(questions.id));
 
   return NextResponse.json(rows);
 }

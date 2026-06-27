@@ -13,7 +13,7 @@ type Question = {
   type: string;
 };
 
-type Draft = Omit<Question, "id" | "type"> & { type?: string };
+type Draft = Omit<Question, "id"> & { type: string };
 
 const CATEGORIES = ["露出", "レンズ", "構図", "ライティング", "カメラの仕組み"];
 const DIFFICULTIES = [
@@ -46,6 +46,7 @@ export default function AdminPage() {
   const [generating, setGenerating] = useState(false);
   const [genCategory, setGenCategory] = useState(CATEGORIES[0]);
   const [genDifficulty, setGenDifficulty] = useState("medium");
+  const [genType, setGenType] = useState("multiple_choice");
   const [feedback, setFeedback] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -97,7 +98,7 @@ export default function AdminPage() {
     const res = await fetch("/api/questions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...draft, type: "multiple_choice" }),
+      body: JSON.stringify({ ...draft, type: draft.type ?? genType }),
     });
     setSaving(false);
     if (res.ok) {
@@ -119,6 +120,7 @@ export default function AdminPage() {
       body: JSON.stringify({
         category: genCategory,
         difficulty: genDifficulty,
+        type: genType,
         feedback: feedback || undefined,
       }),
     });
@@ -187,6 +189,33 @@ export default function AdminPage() {
                   <option key={d.value} value={d.value}>{d.label}</option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          {/* Type selector */}
+          <div className="flex flex-col gap-1 mb-4">
+            <label className="text-xs font-bold text-slate-500">出題タイプ</label>
+            <div className="flex gap-2">
+              {[
+                { value: "multiple_choice", label: "4択" },
+                { value: "true_false", label: "○×" },
+                { value: "fill_blank", label: "穴埋め" },
+                { value: "ordering", label: "並べ替え" },
+                { value: "matching", label: "関連付け" },
+              ].map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => { setGenType(t.value); setDraft(null); setFeedback(""); }}
+                  className={`px-4 py-1.5 rounded-xl text-sm font-bold border transition-all active:scale-95 ${
+                    genType === t.value
+                      ? "bg-slate-800 text-white border-slate-800"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -279,7 +308,7 @@ export default function AdminPage() {
                 const res = await fetch("/api/questions", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ ...data, type: "multiple_choice" }),
+                  body: JSON.stringify(data),
                 });
                 setSaving(false);
                 if (res.ok) {
@@ -443,97 +472,258 @@ function EditForm({
   );
 }
 
+const TRUE_FALSE_CHOICES = [
+  { label: "A", text: "○" },
+  { label: "B", text: "×" },
+];
+
+const LABELS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+
 function ManualAddForm({
   onSave,
   onCancel,
   saving,
 }: {
-  onSave: (data: Omit<Question, "id" | "type">) => void;
+  onSave: (data: Omit<Question, "id">) => void;
   onCancel: () => void;
   saving: boolean;
 }) {
-  const [form, setForm] = useState({
-    category: "露出",
-    question: "",
-    choices: [
-      { label: "A", text: "" },
-      { label: "B", text: "" },
-      { label: "C", text: "" },
-      { label: "D", text: "" },
-    ],
-    answer: "A",
-    explanation: "",
-    difficulty: "medium",
-  });
+  const [type, setType] = useState("multiple_choice");
+  const [category, setCategory] = useState("露出");
+  const [difficulty, setDifficulty] = useState("medium");
+  const [question, setQuestion] = useState("");
+  const [explanation, setExplanation] = useState("");
+
+  // multiple_choice
+  const [mcChoices, setMcChoices] = useState(["", "", "", ""]);
+  const [mcAnswer, setMcAnswer] = useState("A");
+
+  // true_false
+  const [tfAnswer, setTfAnswer] = useState("A");
+
+  // fill_blank
+  const [fbAnswer, setFbAnswer] = useState("");
+
+  // ordering: items entered in correct order
+  const [orderItems, setOrderItems] = useState(["", "", "", ""]);
+
+  // matching: pairs [left, right]
+  const [matchRows, setMatchRows] = useState([
+    { left: "", right: "" },
+    { left: "", right: "" },
+    { left: "", right: "" },
+  ]);
+
+  function handleTypeChange(newType: string) {
+    setType(newType);
+  }
+
+  function buildPayload(): Omit<Question, "id"> | null {
+    if (!question.trim()) return null;
+
+    if (type === "multiple_choice") {
+      const choices = mcChoices.map((text, i) => ({ label: LABELS[i], text }));
+      return { type, category, difficulty, question, choices, answer: mcAnswer, explanation };
+    }
+    if (type === "true_false") {
+      return { type, category, difficulty, question, choices: TRUE_FALSE_CHOICES, answer: tfAnswer, explanation };
+    }
+    if (type === "fill_blank") {
+      if (!fbAnswer.trim()) return null;
+      return { type, category, difficulty, question, choices: [], answer: fbAnswer.trim(), explanation };
+    }
+    if (type === "ordering") {
+      const filled = orderItems.filter((t) => t.trim());
+      if (filled.length < 2) return null;
+      const choices = filled.map((text, i) => ({ label: LABELS[i], text }));
+      const answer = choices.map((c) => c.label).join(",");
+      return { type, category, difficulty, question, choices, answer, explanation };
+    }
+    if (type === "matching") {
+      const filled = matchRows.filter((r) => r.left.trim() && r.right.trim());
+      if (filled.length < 2) return null;
+      const n = filled.length;
+      const leftChoices = filled.map((r, i) => ({ label: LABELS[i], text: r.left }));
+      const rightChoices = filled.map((r, i) => ({ label: LABELS[n + i], text: r.right }));
+      const choices = [...leftChoices, ...rightChoices];
+      const answer = leftChoices.map((l, i) => `${l.label}:${rightChoices[i].label}`).join(",");
+      return { type, category, difficulty, question, choices, answer, explanation };
+    }
+    return null;
+  }
+
+  function handleSubmit() {
+    const payload = buildPayload();
+    if (payload) onSave(payload);
+  }
+
+  const isSubmittable = !!buildPayload();
+
+  const TYPE_TABS = [
+    { value: "multiple_choice", label: "4択" },
+    { value: "true_false", label: "○×" },
+    { value: "fill_blank", label: "穴埋め" },
+    { value: "ordering", label: "並べ替え" },
+    { value: "matching", label: "関連付け" },
+  ];
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm border border-dashed border-slate-300 mb-3">
       <p className="text-xs font-black text-slate-500 mb-3">新規問題</p>
+
+      {/* Type tabs */}
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {TYPE_TABS.map((t) => (
+          <button
+            key={t.value}
+            type="button"
+            onClick={() => handleTypeChange(t.value)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+              type === t.value ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-500 border-slate-200"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* カテゴリ・難易度 */}
       <div className="flex gap-2 mb-3">
-        <select
-          value={form.category}
-          onChange={(e) => setForm({ ...form, category: e.target.value })}
-          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none"
-        >
-          {["露出", "レンズ", "構図", "ライティング", "カメラの仕組み"].map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
+        <select value={category} onChange={(e) => setCategory(e.target.value)}
+          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none">
+          {["露出", "レンズ", "構図", "ライティング", "カメラの仕組み"].map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select
-          value={form.difficulty}
-          onChange={(e) => setForm({ ...form, difficulty: e.target.value })}
-          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none"
-        >
+        <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}
+          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none">
           <option value="easy">やさしい</option>
           <option value="medium">ふつう</option>
           <option value="hard">むずかしい</option>
         </select>
       </div>
-      <textarea
-        value={form.question}
-        onChange={(e) => setForm({ ...form, question: e.target.value })}
-        rows={2}
-        placeholder="問題文"
-        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none mb-2 resize-none"
+
+      {/* 問題文 */}
+      <textarea value={question} onChange={(e) => setQuestion(e.target.value)} rows={2}
+        placeholder={
+          type === "fill_blank" ? "問題文（空欄は___で表す）" :
+          type === "ordering" ? "問題文（例：正しい順番に並べてください）" :
+          type === "matching" ? "問題文（例：正しく組み合わせてください）" : "問題文"
+        }
+        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none mb-3 resize-none"
       />
-      {form.choices.map((c, i) => (
-        <div key={c.label} className="flex gap-2 items-center mb-1.5">
-          <span className="text-xs font-black text-slate-500 w-4">{c.label}</span>
-          <input
-            value={c.text}
-            onChange={(e) => {
-              const nc = [...form.choices];
-              nc[i] = { ...nc[i], text: e.target.value };
-              setForm({ ...form, choices: nc });
-            }}
-            placeholder={`選択肢 ${c.label}`}
-            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none"
-          />
+
+      {/* ── 4択 ── */}
+      {type === "multiple_choice" && (
+        <>
+          {mcChoices.map((text, i) => (
+            <div key={i} className="flex gap-2 items-center mb-1.5">
+              <span className="text-xs font-black text-slate-500 w-4">{LABELS[i]}</span>
+              <input value={text} onChange={(e) => { const nc = [...mcChoices]; nc[i] = e.target.value; setMcChoices(nc); }}
+                placeholder={`選択肢 ${LABELS[i]}`}
+                className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
+            </div>
+          ))}
+          <div className="flex gap-2 items-center mb-3">
+            <span className="text-xs font-bold text-slate-500">正解：</span>
+            <select value={mcAnswer} onChange={(e) => setMcAnswer(e.target.value)}
+              className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none">
+              {["A", "B", "C", "D"].map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+        </>
+      )}
+
+      {/* ── ○× ── */}
+      {type === "true_false" && (
+        <div className="flex gap-3 items-center mb-3">
+          {TRUE_FALSE_CHOICES.map((c) => (
+            <div key={c.label} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg">
+              <span className="text-xs font-black text-slate-400">{c.label}</span>
+              <span className="text-sm font-bold text-slate-700">{c.text}</span>
+            </div>
+          ))}
+          <span className="text-xs text-slate-400">正解：</span>
+          <select value={tfAnswer} onChange={(e) => setTfAnswer(e.target.value)}
+            className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none">
+            <option value="A">A（○）</option>
+            <option value="B">B（×）</option>
+          </select>
         </div>
-      ))}
-      <div className="flex gap-2 items-center mb-2">
-        <span className="text-xs font-bold text-slate-500">正解：</span>
-        <select
-          value={form.answer}
-          onChange={(e) => setForm({ ...form, answer: e.target.value })}
-          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-semibold focus:outline-none"
-        >
-          {["A", "B", "C", "D"].map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
-      </div>
-      <textarea
-        value={form.explanation}
-        onChange={(e) => setForm({ ...form, explanation: e.target.value })}
-        rows={2}
+      )}
+
+      {/* ── 穴埋め ── */}
+      {type === "fill_blank" && (
+        <div className="flex gap-2 items-center mb-3">
+          <span className="text-xs font-bold text-slate-500 shrink-0">正解：</span>
+          <input value={fbAnswer} onChange={(e) => setFbAnswer(e.target.value)}
+            placeholder="空欄に入る正解テキスト"
+            className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
+        </div>
+      )}
+
+      {/* ── 並べ替え ── */}
+      {type === "ordering" && (
+        <div className="mb-3">
+          <p className="text-xs text-slate-400 mb-2">正しい順番で入力してください（上から順に正解）</p>
+          {orderItems.map((text, i) => (
+            <div key={i} className="flex gap-2 items-center mb-1.5">
+              <span className="text-xs font-black text-slate-400 w-4">{i + 1}</span>
+              <input value={text} onChange={(e) => { const n = [...orderItems]; n[i] = e.target.value; setOrderItems(n); }}
+                placeholder={`${i + 1}番目の項目`}
+                className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
+            </div>
+          ))}
+          <div className="flex gap-2 mt-1">
+            {orderItems.length < 4 && (
+              <button type="button" onClick={() => setOrderItems((p) => [...p, ""])}
+                className="text-xs text-slate-500 border border-slate-200 px-2 py-1 rounded-lg">＋ 項目追加</button>
+            )}
+            {orderItems.length > 2 && (
+              <button type="button" onClick={() => setOrderItems((p) => p.slice(0, -1))}
+                className="text-xs text-red-400 border border-red-100 px-2 py-1 rounded-lg">－ 削除</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 関連付け ── */}
+      {type === "matching" && (
+        <div className="mb-3">
+          <div className="grid grid-cols-2 gap-2 mb-1">
+            <p className="text-xs font-bold text-slate-400">左側</p>
+            <p className="text-xs font-bold text-slate-400">右側（対応）</p>
+          </div>
+          {matchRows.map((row, i) => (
+            <div key={i} className="grid grid-cols-2 gap-2 mb-1.5">
+              <input value={row.left} onChange={(e) => { const n = [...matchRows]; n[i] = { ...n[i], left: e.target.value }; setMatchRows(n); }}
+                placeholder={`左${i + 1}`}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
+              <input value={row.right} onChange={(e) => { const n = [...matchRows]; n[i] = { ...n[i], right: e.target.value }; setMatchRows(n); }}
+                placeholder={`右${i + 1}`}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 focus:outline-none" />
+            </div>
+          ))}
+          <div className="flex gap-2 mt-1">
+            {matchRows.length < 5 && (
+              <button type="button" onClick={() => setMatchRows((p) => [...p, { left: "", right: "" }])}
+                className="text-xs text-slate-500 border border-slate-200 px-2 py-1 rounded-lg">＋ ペア追加</button>
+            )}
+            {matchRows.length > 2 && (
+              <button type="button" onClick={() => setMatchRows((p) => p.slice(0, -1))}
+                className="text-xs text-red-400 border border-red-100 px-2 py-1 rounded-lg">－ 削除</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 解説 */}
+      <textarea value={explanation} onChange={(e) => setExplanation(e.target.value)} rows={2}
         placeholder="解説"
         className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none resize-none mb-3"
       />
+
       <div className="flex gap-2">
-        <button
-          onClick={() => onSave(form)}
-          disabled={saving || !form.question}
-          className="flex-1 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold disabled:opacity-50"
-        >
+        <button onClick={handleSubmit} disabled={saving || !isSubmittable}
+          className="flex-1 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold disabled:opacity-50">
           {saving ? "保存中..." : "追加"}
         </button>
         <button onClick={onCancel} className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600">
