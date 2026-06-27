@@ -66,7 +66,14 @@ JSONのみを出力してください。説明文や\`\`\`は不要です。`;
 
   let parsed;
   try {
-    const jsonStr = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    // コードブロック除去・前後の空白除去
+    let jsonStr = raw
+      .replace(/```json\s*/gi, "")
+      .replace(/```\s*/g, "")
+      .trim();
+    // JSON部分だけ抽出（{〜}の範囲）
+    const match = jsonStr.match(/\{[\s\S]*\}/);
+    if (match) jsonStr = match[0];
     parsed = JSON.parse(jsonStr);
   } catch {
     return NextResponse.json({ error: "AIの出力をパースできませんでした", raw }, { status: 500 });
